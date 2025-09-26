@@ -1,56 +1,87 @@
-#include "DHT.h"
-#include <Wire.h>         // Bibliothèque pour la communication I2C
-#include <LiquidCrystal_I2C.h> // Bibliothèque pour l'écran LCD i2C
 
-// Configuration du capteur DHT11
-#define DHTPIN 2          // Pin connectée à la broche DATA du capteur
-#define DHTTYPE DHT11     // Type de capteur : DHT11
+// ---- Pinout ----
+int tonePin  = 4;   // Buzzer (Red Jumper)
+int trigPin  = 9;   // HC-SR04 Trig (Violet Jumper)
+int echoPin  = 10;  // HC-SR04 Echo (Yellow Jumper)
 
-DHT dht(DHTPIN, DHTTYPE); // Initialisation de l'objet DHT
+int clockPin = 11;  // 74HC595 SH_CP (White Jumper)
+int latchPin = 12;  // 74HC595 ST_CP (Blue Jumper)
+int dataPin  = 13;  // 74HC595 DS (Green Jumper)
 
-// Configuration de l'écran LCD (adresse i2C, colonnes, lignes)
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+// ---- LED Patterns (8 LEDs) ----
+// Each bit = LED state (1 = ON, 0 = OFF)
+byte possible_patterns[9] = {
+  B00000000,  // 0 LEDs
+  B00000001,  // 1 LED
+  B00000011,  // 2 LEDs
+  B00000111,  // 3 LEDs
+  B00001111,  // 4 LEDs
+  B00011111,  // 5 LEDs
+  B00111111,  // 6 LEDs
+  B01111111,  // 7 LEDs
+  B11111111   // 8 LEDs
+};
+
+// ---- Variables ----
+int proximity = 0;
+long duration;
+int distance;
 
 void setup() {
-  Serial.begin(9600);      // Initialisation de la communication série
-  dht.begin();             // Initialisation du capteur DHT11
-  lcd.init();              // Initialisation de l'écran LCD
-  lcd.backlight();         // Activer le rétroéclairage de l'écran
-  lcd.setCursor(0, 0);     // Positionnement du curseur sur la première ligne
-  lcd.print("Initialisation"); 
-  delay(2000);             // Pause pour afficher le message d'accueil
-  lcd.clear();             // Efface l'écran avant le début des mesures
+  // Serial Monitor (debug)
+  Serial.begin(9600);
+
+  // Ultrasonic sensor
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  // Shift register
+  pinMode(clockPin, OUTPUT);
+  pinMode(latchPin, OUTPUT);
+  pinMode(dataPin, OUTPUT);
+
+  // Buzzer
+  pinMode(tonePin, OUTPUT);
 }
 
 void loop() {
-  // Lecture des données du capteur
-  float temp = dht.readTemperature(); // Lecture de la température en Celsius
-  float hum = dht.readHumidity();     // Lecture de l'humidité en %
+  // ---- Measure distance ----
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(1000);
+  digitalWrite(trigPin, LOW);
 
-  // Vérification des erreurs
-  if (isnan(temp) || isnan(hum)) {
-    Serial.println("Erreur : Données invalides du capteur !");
-    lcd.setCursor(0, 0);
-    lcd.print("Erreur capteur !");
-    lcd.setCursor(0, 1);
-    lcd.print("Verifiez liaison");
-  } else {
-    // Affichage des mesures sur le Moniteur Série
-    Serial.println("Température : " + String(temp) + " °C");
-    Serial.println("Humidité : " + String(hum) + " %");
+  duration = pulseIn(echoPin, HIGH);
+  distance = (duration / 2) / 29.1; // Convert to cm
 
-    // Affichage des mesures sur l'écran LCD
-    lcd.setCursor(0, 0); // Position sur la première ligne
-    lcd.print("Temp: ");
-    lcd.print(temp);
-    lcd.print(" C");
-    lcd.setCursor(0, 1); // Position sur la deuxième ligne
-    lcd.print("Hum: ");
-    lcd.print(hum);
-    lcd.print(" %");
+  // ---- Map distance → proximity (0..8) ----
+  proximity = map(distance, 0, 45, 8, 0);
+
+  // Clamp value
+  if (proximity < 0) proximity = 0;
+  if (proximity > 8) proximity = 8;
+
+  // ---- Debug ----
+  Serial.print("Distance: ");
+  Serial.print(distance);
+  Serial.print(" cm | LEDs: ");
+  Serial.println(proximity);
+
+  // ---- Buzzer alerts ----
+  if (proximity >= 3 && proximity <= 4) {
+    tone(tonePin, 2000, 200); // Medium frequency
+  }
+  else if (proximity >= 5 && proximity <= 6) {
+    tone(tonePin, 500, 200);  // Lower frequency
+  }
+  else if (proximity >= 7 && proximity <= 8) {
+    tone(tonePin, 100, 200);  // Very low frequency
   }
 
-  // Pause de 10 secondes avant la prochaine lecture
-  delay(10000);
-}
+  // ---- LEDs display via 74HC595 ----
+  digitalWrite(latchPin, LOW);
+  shiftOut(dataPin, clockPin, MSBFIRST, possible_patterns[proximity]);
+  digitalWrite(latchPin, HIGH);
 
+  delay(600);
+  noTone(tonePin);
+}
